@@ -1,0 +1,92 @@
+# نصب پکیج‌های مورد نیاز
+!pip install -q faster-whisper
+
+import os
+import zipfile
+import time
+from faster_whisper import WhisperModel
+from google.colab import drive
+
+# 1. اتصال به Google Drive
+drive.mount('/content/drive')
+print("اتصال به Google Drive با موفقیت انجام شد!")
+
+# 2. تعیین مسیرها
+input_zip_path = "/content/drive/MyDrive/AI_Worker/Zip_Files_PC/23.Asenat_mp3Files.zip"  # مسیر فایل زیپ ورودی در درایو
+extract_folder = "/content/audio_files"  # پوشه استخراج موقت
+output_folder = "/content/subtitles"  # پوشه خروجی موقت
+output_zip_path = "/content/drive/MyDrive/subtitles_output.zip"  # مسیر نهایی فایل زیپ در درایو
+
+# 3. ایجاد پوشه‌های مورد نیاز
+os.makedirs(extract_folder, exist_ok=True)
+os.makedirs(output_folder, exist_ok=True)
+
+# 4. استخراج فایل زیپ
+print("در حال استخراج فایل زیپ...")
+with zipfile.ZipFile(input_zip_path, 'r') as zip_ref:
+    zip_ref.extractall(extract_folder)
+print("استخراج با موفقیت انجام شد.")
+
+# 5. بارگذاری مدل
+print("در حال بارگذاری مدل...")
+model = WhisperModel("large", device="cuda", compute_type="float16")
+print("مدل با موفقیت بارگذاری شد.")
+
+# 6. تابع تبدیل زمان به فرمت SRT
+def format_time(seconds):
+    millisec = int((seconds % 1) * 1000)
+    hours, remainder = divmod(int(seconds), 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"{hours:02}:{minutes:02}:{seconds:02},{millisec:03}"
+
+# 7. تابع ذخیره زیرنویس
+def save_srt(segments, output_path):
+    with open(output_path, "w", encoding="utf-8") as f:
+        count = 1
+        for segment in segments:
+            start_time = format_time(segment.start)
+            end_time = format_time(segment.end)
+            text = segment.text
+            f.write(f"{count}\n{start_time} --> {end_time}\n{text}\n\n")
+            count += 1
+
+# 8. پردازش فایل‌های صوتی
+print("شروع پردازش فایل‌های صوتی...")
+audio_extensions = ('.mp3', '.wav', '.m4a')
+processed_files = 0
+
+for root, _, files in os.walk(extract_folder):
+    for file in files:
+        if file.lower().endswith(audio_extensions):
+            audio_path = os.path.join(root, file)
+            print(f"در حال پردازش: {audio_path}")
+            
+            # تشخیص گفتار
+            segments, _ = model.transcribe(audio_path, language="fa")
+            segments = list(segments)
+            
+            # ذخیره زیرنویس
+            srt_filename = os.path.splitext(file)[0] + ".srt"
+            srt_path = os.path.join(output_folder, srt_filename)
+            save_srt(segments, srt_path)
+            print(f"زیرنویس ذخیره شد: {srt_path}")
+            processed_files += 1
+
+print(f"تعداد فایل‌های پردازش شده: {processed_files}")
+
+# 9. ایجاد فایل زیپ از نتایج
+print("در حال ایجاد فایل زیپ...")
+with zipfile.ZipFile(output_zip_path, 'w') as zipf:
+    for root, _, files in os.walk(output_folder):
+        for file in files:
+            file_path = os.path.join(root, file)
+            arcname = os.path.relpath(file_path, output_folder)
+            zipf.write(file_path, arcname)
+
+print(f"فایل زیپ با موفقیت ایجاد شد و در این مسیر ذخیره شد: {output_zip_path}")
+
+# 10. پاکسازی فایل‌های موقت (اختیاری)
+# !rm -rf {extract_folder}
+# !rm -rf {output_folder}
+
+print("پروسه با موفقیت به پایان رسید!")
